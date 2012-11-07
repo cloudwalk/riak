@@ -5,6 +5,8 @@
 
 set -e
 
+# install startup script
+update-rc.d riak defaults >/dev/null
 
 # create riak group
 if ! getent group riak >/dev/null; then

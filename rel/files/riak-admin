@@ -5,6 +5,7 @@ RUNNER_SCRIPT=${0##*/}
 
 RUNNER_BASE_DIR={{runner_base_dir}}
 RUNNER_ETC_DIR={{runner_etc_dir}}
+RUNNER_LIB_DIR={{platform_lib_dir}}
 RUNNER_LOG_DIR={{runner_log_dir}}
 RUNNER_USER={{runner_user}}
 
@@ -310,6 +311,17 @@ case "$1" in
         $NODETOOL rpc riak_kv_js_manager reload $@
         ;;
 
+    erl_reload)
+        # Reload user Erlang code
+        RES=`$NODETOOL ping`
+        if [ "$RES" != "pong" ]; then
+            echo "Node is not running!"
+            exit 1
+        fi
+
+        $NODETOOL rpc riak_kv_console reload_code
+        ;;
+
     reip)
         ACTION=$1
         shift
@@ -326,6 +338,7 @@ case "$1" in
         OLDNODE=$1
         NEWNODE=$2
         $ERTS_PATH/erl -noshell \
+            -pa $RUNNER_LIB_DIR/basho-patches \
             -config $RUNNER_ETC_DIR/app.config \
             -eval "riak_kv_console:$ACTION(['$OLDNODE', '$NEWNODE'])" \
             -s init stop
@@ -345,6 +358,7 @@ case "$1" in
         FILENAME=$3
 
         $ERTS_PATH/erl -noshell $NAME_PARAM riak_kv_backup$NAME_HOST -setcookie $COOKIE \
+                       -pa $RUNNER_LIB_DIR/basho-patches \
                        -eval "riak_kv_backup:$ACTION('$NODE', \"$FILENAME\")" -s init stop
         ;;
 
@@ -363,6 +377,7 @@ case "$1" in
         TYPE=$4
 
         $ERTS_PATH/erl -noshell $NAME_PARAM riak_kv_backup$NAME_HOST -setcookie $COOKIE \
+                       -pa $RUNNER_LIB_DIR/basho-patches \
                        -eval "riak_kv_backup:$ACTION('$NODE', \"$FILENAME\", \"$TYPE\")" -s init stop
         ;;
 
@@ -380,17 +395,66 @@ case "$1" in
         NODE_NAME=${NAME_ARG#* }
 
         $ERTS_PATH/erl -noshell $NAME_PARAM riak_test$NAME_HOST $COOKIE_ARG \
+                       -pa $RUNNER_LIB_DIR/basho-patches \
                        -eval "case catch(riak:client_test(\"$NODE_NAME\")) of \
                                ok -> init:stop();                             \
                                _  -> init:stop(1)                             \
                               end."
 
         ;;
+    diag)
+        # Riaknostic location
+        RIAKNOSTIC_LOC="$ERTS_PATH/../../lib/riaknostic/riaknostic"
+
+        # Riaknostic user
+        RIAKNOSTIC_USER=$RUNNER_USER
+        if [ -z $RUNNER_USER ]; then
+            RIAKNOSTIC_USER=$LOGNAME
+        fi
+
+        # Setup command to run riaknostic
+        RIAKNOSTIC="$ERTS_PATH/escript $RIAKNOSTIC_LOC --user $RIAKNOSTIC_USER \
+            --etc $RUNNER_ETC_DIR --base $RUNNER_BASE_DIR"
+
+        # URL for Riaknostic download instructions
+        RIAKNOSTIC_URL="http://riaknostic.basho.com/"
+
+        shift
+
+        if [ -f "$RIAKNOSTIC_LOC" ]; then
+            $RIAKNOSTIC "$@"
+        else
+            echo "Riak diagnostics utility is not present!"
+            echo "Visit $RIAKNOSTIC_URL for instructions."
+            exit 1
+        fi
+
+        ;;
+    top)
+        # Make sure the local node IS running
+        RES=`$NODETOOL ping`
+        if [ "$RES" != "pong" ]; then
+            echo "Node is not running!"
+            exit 1
+        fi
+        shift
+
+        MYPID=$$
+        NODE_NAME=${NAME_ARG#* }
+        $ERTS_PATH/erl -noshell -noinput \
+            -pa $RUNNER_LIB_DIR/basho-patches \
+            -hidden $NAME_PARAM riak_etop$MYPID$NAME_HOST $COOKIE_ARG \
+            -s etop -s erlang halt -output text \
+            -node $NODE_NAME \
+            $* -tracing off
+        ;;
     *)
         echo "Usage: $SCRIPT { join | leave | backup | restore | test | status | "
-        echo "                    reip | js_reload | wait-for-service | ringready | "
-        echo "                    transfers | force-remove | down | cluster_info | "
-        echo "                    member_status | ring_status | vnode-status}"
+        echo "                    reip | js_reload | erl_reload | wait-for-service | "
+        echo "                    ringready | transfers | force-remove | down | "
+        echo "                    cluster_info | member_status | ring_status | vnode-status |"
+        echo "                    diag |"
+        echo "                    top [-interval N] [-sort reductions|memory|msg_q} [-lines N]"
         exit 1
         ;;
 esac
