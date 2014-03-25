@@ -345,8 +345,7 @@ make build_plt
 make check_plt
 #+END_SRC
 
-**** Run Dialyzer
-    
+**** Run Dialyzer    
 #+BEGIN_SRC shell
 make dialyzer
 #+END_SRC
